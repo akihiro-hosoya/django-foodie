@@ -36,9 +36,11 @@ class IndexView(TemplateView):
         pickup_restaurant = get_restaurant_info(result)
 
         params = {
-            'searchform': searchform
-        }
+            'searchform': searchform,
+            'pickup_restaurant': pickup_restaurant,
+            }
         return params
+
 
 def Search(request):
     if request.method == 'GET':
@@ -133,11 +135,75 @@ def Search(request):
 
         context = {
             'total_hit_count': total_hit_count,
-            'restaurant_list': restaurant_list,
+            'restaurant_list': page_obj.object_list,
             'page_obj': page_obj,
         }
 
         return render(request, 'foodie/search.html', context)
+
+
+def ShopInfo(request, restid):
+    query = get_gnavi_data(
+        restid,
+        "",
+        "",
+        "",
+        1
+    )
+    result = gnavi_api(query)
+    restaurants_info = get_restaurant_info(result)
+
+    if request.method == 'GET':
+        review_count = Review.objects.filter(shop_id=restid).count()
+        score_ave = Review.objects.filter(shop_id=restid).aggregate(Avg('score'))
+        average = score_ave['score__avg']
+        if average:
+            average_rate = average / 5 * 100
+        else:
+            average_rate = 0
+        review_form = ReviewForm()
+        review_list = Review.objects.filter(shop_id=restid)
+
+        params = {
+            'review_count': review_count,
+            'restaurants_info': restaurants_info,
+            'review_form': review_form,
+            'review_list': review_list,
+            'average': average,
+            'average_rate': average_rate,
+        }
+        return render(request, 'foodie/shop_info.html', params)
+    else:
+        form = ReviewForm(data=request.POST)
+
+        if form.is_valid():
+            review = Review()
+            review.shop_id = restid
+            review.shop_name = restaurants_info[0][2]
+            review.user = request.user
+            review.score = request.POST['score']
+            review.comment = request.POST['comment']
+            is_exist = Review.objects.filter(shop_id = review.shop_id).filter(user = review.user).count()
+            
+            if is_exist:
+                messages.error(request, 'レビューを投稿済みです')
+            else:
+                review.save()
+                messages.success(request, 'レビューを投稿しました')
+        else:
+            messages.error(request, 'エラーがあります')
+
+        return redirect('shop_info', restid)
+
+
+def gnavi_api(params):
+    result = []
+    result_api = requests.get(GNAVI_URL, params).text
+    result_json = json.loads(result_api)
+    if "error" not in result_json:
+        result.extend(result_json["rest"])
+    return result
+
 
 def paginate_queryset(request, queryset, count):
     paginator = Paginator(queryset, count)
@@ -149,14 +215,6 @@ def paginate_queryset(request, queryset, count):
     except EmptyPage:
         page_obj = paginator.page(paginator.num_pages)
     return page_obj
-
-def gnavi_api(query):
-    result = []
-    result_api = requests.get(GNAVI_URL, params=query).text
-    result_json = json.loads(result_api)
-    if "error" not in result_json:
-        result.extend(result_json["rest"])
-    return result
 
 
 def get_gnavi_data(
@@ -332,56 +390,3 @@ def get_restaurant_info(restaurants):
             e_money # 37
         ])
     return restaurant_list
-
-def ShopInfo(request, restid):
-    query = get_gnavi_data(
-        restid, # id
-        "",
-        "",
-        "",
-        1
-    )
-    result = gnavi_api(query)
-    restaurants_info = get_restaurant_info(result)
-
-    if request.method == 'GET':
-        review_count = Review.objects.filter(shop_id=restid).count()
-        score_ave = Review.objects.filter(shop_id=restid).aggregate(Avg('score'))
-        average = score_ave['score__avg']
-        if average:
-            average_rate = average / 5 * 100
-        else:
-            average_rate = 0
-        review_form = ReviewForm()
-        review_list = Review.objects.filter(shop_id=restid)
-
-        params = {
-            'review_count': review_count,
-            'restaurants_info': restaurants_info,
-            'review_form': review_form,
-            'review_list': review_list,
-            'average': average,
-            'average_rate': average_rate,
-        }
-        return render(request, 'foodie/shop_info.html', params)
-    else:
-        form = ReviewForm(data=request.POST)
-
-        if form.is_valid():
-            review = Review()
-            review.shop_id = restid
-            review.shop_name = restaurants_info[0][2]
-            review.user = request.user
-            review.score = request.POST['score']
-            review.comment = request.POST['comment']
-            is_exist = Review.objects.filter(shop_id = review.shop_id).filter(user = review.user).count()
-            
-            if is_exist:
-                messages.error(request, '口コミを投稿済みです')
-            else:
-                review.save()
-                messages.success(request, '口コミを投稿しました')
-        else:
-            messages.error(request, 'エラーがあります')
-
-        return redirect('shop_info', restid)
